@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "background-computer-use",
+  "version": "0.1.2",
+  "description": "Observe occluded Windows apps and operate background controls without global mouse input, with an explicit foreground mouse handoff.",
+  "author": {"name": "Gage Cottom"},
+  "keywords": ["windows", "background", "computer-use", "accessibility", "capture", "mouse"],
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/setup/SKILL.md",
+      "interface": {
+        "displayName": "Background Computer Use",
+        "shortDescription": "View covered windows and work without taking over the host mouse.",
+        "longDescription": "Strict window capture without activation or restoration, identity-bound background controls and window-message mouse clicks. Foreground physical mouse control remains a separate, explicitly chosen route through Computer Use.",
+        "developerName": "Local",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"]
+      }
+    }
+  }
+}

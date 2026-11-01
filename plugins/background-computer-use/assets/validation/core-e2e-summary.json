@@ -1,0 +1,72 @@
+{
+  "passed": true,
+  "helper_sha256": "5ce953bb393d7a0ac0513cf2abb0186d5331ff358d349e6c35a2ef8e027318a8",
+  "scope": "Actual Python core and stdio MCP backed by native helper, owned fixture only.",
+  "run_directory": "Original detailed receipts are retained in the development checkout.",
+  "initial_image": {
+    "width": 402,
+    "height": 199,
+    "known_color_counts": {
+      "249cb7": 49446,
+      "ffc44a": 5391
+    },
+    "sha256": "cd0912bd57be761a61bc42289c9bf4e397f79f32c3b74ba6c7866288dc30c5f2"
+  },
+  "final_image": {
+    "width": 402,
+    "height": 199,
+    "known_color_counts": {
+      "249cb7": 49446,
+      "ffc44a": 5405
+    },
+    "sha256": "5b146daa8bde4e1788d2e00a5281940c3024ad6bd5ec497c5860e5aa50147632"
+  },
+  "mcp_image": {
+    "width": 402,
+    "height": 199,
+    "known_color_counts": {
+      "249cb7": 49446,
+      "ffc44a": 5405
+    },
+    "sha256": "5b146daa8bde4e1788d2e00a5281940c3024ad6bd5ec497c5860e5aa50147632"
+  },
+  "functional_passed": true,
+  "final_readback": {
+    "value": "python-core-background-verified",
+    "counter": 2
+  },
+  "mcp_tool_count": 7,
+  "consumed_observation_rejected": true,
+  "handoff_input_executed": false,
+  "core_action_routes": [
+    "wm_settext",
+    "bm_click",
+    "bm_click"
+  ],
+  "observation": {
+    "sample_count": 2201,
+    "foreground_preserved": true,
+    "cursor_preserved": true,
+    "external_input_observed": false,
+    "before": {
+      "monotonic": 53302.2539004,
+      "foreground_hwnd": "1248242",
+      "cursor": {
+        "x": 769,
+        "y": 0
+      },
+      "last_input_tick": 53051078
+    },
+    "after": {
+      "monotonic": 53314.9782397,
+      "foreground_hwnd": "1248242",
+      "cursor": {
+        "x": 769,
+        "y": 0
+      },
+      "last_input_tick": 53051078
+    },
+    "result": "observed-preserved",
+    "note": "Sampled observations do not attribute changes to code or exclude between-sample changes."
+  }
+}

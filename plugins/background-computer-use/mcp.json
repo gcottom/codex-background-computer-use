@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "background_computer_use": {
+      "type": "stdio",
+      "command": "py",
+      "args": ["-3", "${PLUGIN_ROOT}/server.py"]
+    }
+  }
+}

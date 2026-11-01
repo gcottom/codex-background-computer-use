@@ -1,0 +1,28 @@
+{
+  "native_backend": {
+    "version": "1.0.0",
+    "architecture": "win-x64",
+    "published_path": "D:\\Tools\\BackgroundComputerUse\\native\\BackgroundComputerUse.Native.exe",
+    "sha256": "5ce953bb393d7a0ac0513cf2abb0186d5331ff358d349e6c35a2ef8e027318a8",
+    "size_bytes": 166637424,
+    "self_contained_single_file": true
+  },
+  "dotnet_sdk": {
+    "version": "10.0.403",
+    "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.403/dotnet-sdk-10.0.403-win-x64.zip",
+    "sha512": "7a114c318fa7f1d9822991b534b2814d0e78386ceda816b371f5141acefe741d87ccb606ede06cadac8f9ac5070e32b708a67bbd1619ff5e5a7858a27874ef48",
+    "private_path": "D:\\Tools\\BackgroundComputerUse\\dotnet",
+    "global_path_changed": false
+  },
+  "winapp_uia": {
+    "package": "Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation",
+    "version": "0.7.1",
+    "source_commit": "e3cd0b94f3e7b776ac51ba0564f4908094e979b5",
+    "release_package_url": "https://github.com/microsoft/WinAppCli/releases/download/v0.7.1/Microsoft.Windows.SDK.BuildTools.WinApp.UIAutomation.nupkg",
+    "release_package_sha256": "2c832026b6e11096a1e78dc82bb9295a576414cc57c6155a08539b3f390b58db",
+    "nuget_org_package_sha256": "eb5c2dfe260e0e058123049281001a698741379f9df1550c7ac653ce1af0e66f",
+    "wgc_assembly_sha256": "7b062661e7c37f1f56bb74202aee6a1689c5dbcb0de973d2aeb48817ef37fa37",
+    "nuget_signature_verified": true,
+    "license": "MIT"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "helperSha256": "5CE953BB393D7A0AC0513CF2ABB0186D5331FF358D349E6C35A2EF8E027318A8",
+  "passed": true,
+  "targetColors": {
+    "width": 402,
+    "height": 199,
+    "targetBackgroundPixels": 49446,
+    "coverBackgroundPixels": 0,
+    "coverStripePixels": 0,
+    "counterBackgroundPixels": 5424
+  },
+  "coverColors": {
+    "width": 418,
+    "height": 207,
+    "targetBackgroundPixels": 0,
+    "coverBackgroundPixels": 78329,
+    "coverStripePixels": 5016,
+    "counterBackgroundPixels": 0
+  },
+  "messageClickCounterChanged": true,
+  "allStepsObservedForegroundPreserved": true,
+  "allStepsObservedCursorPreserved": true,
+  "externalInputObserved": false,
+  "finalReadback": {
+    "value": "uia-background-verified",
+    "counter": 2
+  },
+  "minimizedRejectionPreservedMinimized": true,
+  "steps": [
+    {
+      "step": "inspect-covered-target",
+      "exitCode": 0,
+      "error": null,
+      "result": "observed-preserved"
+    },
+    {
+      "step": "reject-stale-pid",
+      "exitCode": 1,
+      "error": "window_identity_mismatch",
+      "result": "observed-preserved"
+    },
+    {
+      "step": "reject-stale-start",
+      "exitCode": 1,
+      "error": "window_identity_mismatch",
+      "result": "observed-preserved"
+    },
+    {
+      "step": "uia-set-value-covered",
+      "exitCode": 0,
+      "error": null,
+      "result": "observed-preserved"
+    },
+    {
+      "step": "uia-invoke-covered",
+      "exitCode": 0,
+      "error": null,
+      "result": "observed-preserved"
+    },
+    {
+      "step": "reject-stale-runtime",
+      "exitCode": 1,
+      "error": "stale_element",
+      "result": "observed-preserved"
+    },
+    {
+      "step": "wgc-capture-covered-target",
+      "exitCode": 0,
+      "error": null,
+      "result": "observed-preserved"
+    },
+    {
+      "step": "wgc-capture-cover",
+      "exitCode": 0,
+      "error": null,
+      "result": "observed-preserved"
+    },
+    {
+      "step": "message-click-covered-increment",
+      "exitCode": 0,
+      "error": null,
+      "result": "observed-preserved"
+    },
+    {
+      "step": "reject-minimized-capture",
+      "exitCode": 1,
+      "error": "window_minimized",
+      "result": "observed-preserved"
+    }
+  ]
+}
