@@ -6,6 +6,12 @@ This is useful when a long-running task depends on keeping another app visible a
 
 The plugin provides value by combining window capture, accessibility controls, and targeted window-message actions in one workflow. Agents can read text and button state, update supported controls, and capture covered windows without moving the pointer. A foreground mouse handoff is available when an application does not support background actions.
 
+## Visual-coordinate fallback
+
+When accessibility data cannot identify a control, the agent can inspect the selected window's WGC image and visually infer the control's location. It then sends the image's zero-based pixel coordinates to `click_background_window`, which maps them through the verified image-to-window geometry and sends a window-message click. This supports icon-only, custom-drawn, or poorly exposed controls while keeping the pointer and foreground window unchanged. Each click uses a fresh observation and is followed by a new image so the agent can verify the result.
+
+The visual fallback uses the selected target window's full frame, including when another window covers it. A full-desktop screenshot cannot reveal covered pixels and would include other visible windows. Visual location is an inference from pixels; it does not prove the app accepted the click, so check the returned image and UI state.
+
 ## What it provides
 
 - Strict WGC-only window snapshots, including covered windows. Capture never restores, activates or moves the target and has no foreground/screen fallback.
