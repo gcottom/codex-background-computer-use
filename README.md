@@ -13,7 +13,7 @@ It helps an agent work with an editor, file manager, game launcher, or other des
 - Offers optional, guarded return to the saved foreground window and virtual desktop after an app-triggered focus change.
 - Hands off to foreground mouse control when an app requires ordinary physical input.
 
-The plugin does not silently inject global mouse or keyboard input. Some apps ignore background messages or require raw/foreground input, and minimized, protected, secure-desktop, or non-rendering windows may not be available. A successful message delivery is not proof that the application accepted the action.
+The plugin does not silently inject global mouse or keyboard input. Suspended apps cannot process input; some apps can be inspected but ignore background clicks; and minimized, protected, secure-desktop, or non-rendering windows may not be available. Apps on another virtual desktop can briefly switch it into view; opt-in guarded handback attempts to return to the saved app and desktop. Child views such as supported WebView/Edge renderer surfaces can be inspected and targeted when their process and geometry are verifiable. A successful message delivery is not proof that the application accepted the action. See the plugin guide's [limitations](plugins/background-computer-use/README.md#limitations) for details.
 
 ## 0.1.9 — faster, typing-tolerant handback
 
