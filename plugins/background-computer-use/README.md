@@ -49,16 +49,18 @@ The desktop restoration interface is an internal, Windows-version-sensitive Shel
 - A published, self-contained native helper. Building it requires the pinned .NET SDK 10.0.403 and network access to restore locked NuGet dependencies.
 - Codex with local plugin support to install it from the marketplace.
 
+The bundled MCP server starts with the `py -3` Windows launcher. If your Python installation uses a different launcher, update the MCP command to match your environment.
+
 ## Install from the marketplace
 
-This repository is configured as the **Background Computer Use** plugin marketplace:
+This public repository is configured as the **Background Computer Use** plugin marketplace:
 
 ```powershell
 codex plugin marketplace add gcottom/codex-background-computer-use
 codex plugin add background-computer-use@background-computer-use-marketplace
 ```
 
-The repository is private. The GitHub account used by Codex must have access to add the marketplace.
+Codex must be installed locally. Build and configure the native helper separately after installing the plugin; the marketplace does not automatically download or run native executables.
 
 ## Build and configure the native helper
 

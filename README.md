@@ -37,14 +37,14 @@ flowchart LR
 
 ## Install from this marketplace
 
-This repository is configured as the **Background Computer Use** plugin marketplace:
+This public repository is configured as the **Background Computer Use** plugin marketplace:
 
 ```powershell
 codex plugin marketplace add gcottom/codex-background-computer-use
 codex plugin add background-computer-use@background-computer-use-marketplace
 ```
 
-The repository is private. The GitHub account used by Codex must have access to add the marketplace.
+Codex must be installed locally and the plugin's native helper must be built and configured separately. See the plugin setup guide for Windows and Python requirements, helper build steps, and verification.
 
 The local Windows host also needs a trusted, self-contained native helper. See the [plugin setup guide](plugins/background-computer-use/README.md) for requirements, build and configuration steps. The helper is not downloaded or executed automatically by the marketplace.
 
