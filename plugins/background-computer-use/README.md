@@ -1,6 +1,10 @@
 # Background Computer Use
 
-A local Windows companion to Computer Use. It views covered windows without activating them and operates controls without moving the user's physical pointer. Physical mouse control remains available as an explicitly chosen foreground route through the existing Computer Use runtime.
+Background Computer Use lets an agent inspect and operate Windows applications while they stay behind other windows. It captures the target window directly and sends supported control actions to that window, so the agent can test or automate an app without taking over the user's mouse or bringing the app to the front. When an app needs ordinary mouse interaction, the agent can hand off to the existing foreground Computer Use workflow.
+
+This is useful when a long-running task depends on keeping another app visible and interactive, such as working in a game, editor, file manager, or dialog while the agent reads status or changes a supported control in a different window. It can reduce interruptions from focus changes and let work continue while the user uses the computer. The agent can inspect the app's current controls and get a fresh image after each action, which makes the result easier to verify than sending blind clicks.
+
+The plugin provides value by combining window capture, accessibility controls, and targeted window-message actions in one workflow. Agents can read text and button state, update supported controls, and capture covered windows without moving the pointer. A foreground mouse handoff is available when an application does not support background actions.
 
 ## What it provides
 
@@ -11,6 +15,8 @@ A local Windows companion to Computer Use. It views covered windows without acti
 - Seven MCP tools plus a deterministic CLI route when chat tools are deferred.
 
 Apps can ignore background messages or activate themselves from a control handler. Minimized/protected/non-rendering windows can be unavailable. The plugin reports these limits instead of taking the mouse or focus automatically. See the bundled skill for the operation loop.
+
+Background actions are not universal remote control: some GPU-rendered apps, games, raw-input interfaces, and custom controls require foreground interaction. Use the returned observation and application state to confirm each result; a successful Windows message alone does not prove the app accepted it.
 
 ## Setup
 
