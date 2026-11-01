@@ -1,39 +1,34 @@
-# Validation — October 30, 2026
+# Release validation — 0.1.9
 
-Plugin 0.1.2; native backend 1.0.0, Windows x64. The helper SHA256 is `5ce953bb393d7a0ac0513cf2abb0186d5331ff358d349e6c35a2ef8e027318a8`.
+## Summary
 
-## Automated checks
+- **39 Python/core/server tests passed.** Coverage includes UIA/message action validation, observation lifetime and replay protection, foreground restoration, input-activity handling, pointer movement, changed foreground windows, MCP schemas, and the delayed handback path.
+- **Native helper 1.7.0 built** with locked NuGet dependencies using .NET SDK 10.0.403. SHA-256 for the release-checkout build: `7C30EF6D42D95D11584835B38C150995BA0B985BD19F5EBA20717E463E956A2C`. Assembly version metadata matches helper version 1.7.0 and does not include a checkout-specific Git revision.
+- **Live VirtualBox Manager test passed.** Selecting the Home view caused the already-open Manager to activate and switch desktops. The first native call restored the saved desktop in 61 ms; an immediate foreground-only retry before fresh screenshot capture verified the exact saved ChatGPT HWND in 58 ms. The final focus summary confirmed both desktop restoration and foreground verification.
 
-30 behavioral and protocol tests passed: observation replay/expiry, process/window/control identity, geometry changes, controls moving or being replaced under a pixel click, protected/disabled controls, unknown action outcomes, no capture fallback, image integrity and coordinate mapping, per-window serialization, desktop measurements, UTF-8, malformed-request recovery, seven-tool MCP discovery, inline PNG integrity and CLI errors. Both packaged skills passed the skill validator.
+## Keyboard activity and focus safeguards
+
+The earlier behavior stopped a requested handback whenever LastInputInfo changed. During one Home-view test, the user was typing while VirtualBox had taken focus; this guard left the Manager foreground. Version 0.1.9 allows an explicitly requested handback to continue through keyboard activity only while the cursor is stationary and the exact action-activated HWND remains foreground. It reports `user_input_since_observation` so callers can see that input occurred.
+
+The typing-tolerance rule is covered by regression tests, including a changed-foreground rejection case. The final live handback run itself had no concurrent keyboard input. Pointer movement or a different foreground HWND still stops a handback. The separate minimize fallback remains opt-in and was not exercised live in this release.
+
+## How to reproduce
+
+Run the Python/core/server suite from `plugins/background-computer-use`:
 
 ```powershell
-$env:PYTHONPATH = (Resolve-Path .).Path
-py -3 -B -m unittest discover -s tests -v
+py -3 -m unittest discover -s tests -v
 ```
 
-## Real native and Python/MCP acceptance
+Build the native helper using the pinned .NET SDK and locked package graph:
 
-Tests used an owned WinForms target, completely covered by another owned window. They never moved the physical pointer, activated the target or operated existing user apps. The final core/MCP run recorded **2,201 samples across 12.72 seconds** with foreground HWND/PID, physical cursor position and LastInputInfo unchanged.
+```powershell
+Set-Location .\plugins\background-computer-use
+.\native\Build.ps1
+```
 
-- WGC returned the target's distinctive contents while it remained covered: 49,446 target-color pixels, 5,405 counter-color pixels and zero cover-color pixels in the final frame.
-- Background text was read back as `python-core-background-verified`.
-- Semantic invocation and the image-coordinate button click produced `Counter: 2` through scoped button messages.
-- A consumed observation was rejected before another mutation.
-- Actual MCP initialize/tools-list/observe produced seven tools and an inline image/png matching the saved image hash.
-- The foreground mouse handoff returned metadata with `input_executed: false`; physical mouse injection was not run during these background tests.
-- Native tests rejected stale PID, process-start and control identities. Minimized capture returned `window_minimized`, created no PNG and left the target minimized.
-- Fixture processes were stopped normally; the final cleanup check found none remaining.
+The marketplace contains source and does not bundle or automatically install the native executable. Configure a locally built helper with `configure_backend` before running capture or control acceptance tests. Prior owned-window fixture receipts and release-specific iteration notes are retained in [VALIDATION_HISTORY.md](VALIDATION_HISTORY.md).
 
-Detailed checkout receipts:
+## Supported scope
 
-- [Core/MCP summary](assets/validation/core-e2e-summary.json)
-- [Native strict-capture and input summary](assets/validation/native-e2e-summary.json)
-- [Covered target's captured contents](assets/validation/target-window-covered.png) and [the covering window](assets/validation/cover-window.png)
-
-## Scope
-
-Covered standard Windows controls are verified. Arbitrary apps and accessibility providers can ignore messages or activate themselves; measured interference is reported. Unsupported WGC, protected/non-rendering/minimized targets and secure desktops have no automatic activation/restore fallback. Games requiring raw/foreground input need a separately chosen route. These tests did not inject physical mouse input or change power/display settings.
-
-## Dependency provenance
-
-The private SDK archive matched Microsoft's published SHA512 and had a valid Microsoft Authenticode signature. The restored UIAutomation package passed NuGet author/repository signature verification, matched the lock file, and contained the same WGC assembly bytes as the official release package. The self-contained single-file executable ran without adjacent managed libraries. Source build outputs and caches live outside the plugin package.
+WGC capture requires Windows 10 build 19041 or later. Virtual-desktop restoration uses internal, version-sensitive Shell interfaces and requires a supported Windows 11 22H2+ build. Apps can ignore background messages, activate themselves, or require raw/foreground input. Minimized, protected, secure-desktop, and non-rendering targets may be unavailable. A delivered window message is not proof of application success; inspect the returned state or image.

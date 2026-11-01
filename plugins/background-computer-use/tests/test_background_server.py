@@ -105,6 +105,9 @@ class BackgroundServerTests(unittest.TestCase):
                     ("observe_background_window", {"window_id": window_id, "depth": True}),
                     ("click_background_window", {"observation_id": observed["observation_id"], "x": True, "y": 40}),
                     ("act_on_control", {"observation_id": observed["observation_id"], "element_id": "increment", "action": "invoke", "activate": True}),
+                    ("act_on_control", {"observation_id": observed["observation_id"], "element_id": "increment", "action": "invoke", "restore_foreground": "yes"}),
+                    ("act_on_control", {"observation_id": observed["observation_id"], "element_id": "increment", "action": "invoke", "minimize_activating_window": True}),
+                    ("click_background_window", {"observation_id": observed["observation_id"], "x": 30, "y": 30, "minimize_activating_window": True}),
                     ("act_on_control", {"observation_id": observed["observation_id"], "element_id": "increment", "action": "global_click"}),
                 ]
                 for name, arguments in malformed:
@@ -137,6 +140,27 @@ class BackgroundServerTests(unittest.TestCase):
                 self.assertFalse(changed["isError"])
                 self.assertEqual(backend.controls[1]["value"], "café Δ 日本語 🎮")
                 self.assertIn("café Δ 日本語 🎮", changed["content"][0]["text"])
+
+    def test_tool_result_emits_root_and_child_surface_images(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = FakeBackend()
+            backend.surfaces = [{
+                "hwnd": "90001", "pid": 27182, "start_time": "638973936000000001", "title": "Embedded surface",
+                "class_name": "WebViewChild", "route": "uia_provider_process_descendant",
+                "window_rect": {"x": -1180, "y": 110, "width": 80, "height": 60},
+                "client_rect": {"x": -1180, "y": 110, "width": 80, "height": 60},
+            }]
+            lab = BackgroundLab(root=tmp, backend=backend, clock=lambda: 1000.0)
+            window_id = lab.list_background_windows()["windows"][0]["window_id"]
+            observed = lab.observe_background_window(window_id, include_image=True)
+            result = server.tool_result(observed)
+            images = [item for item in result["content"] if item["type"] == "image"]
+            self.assertEqual(len(images), 2)
+            labels = [item["text"] for item in result["content"] if item["type"] == "text"]
+            self.assertTrue(any("Verified child surface image" in item for item in labels))
+            child_bytes = base64.b64decode(images[1]["data"], validate=True)
+            child_image = observed["surface_images"][0]["image"]
+            self.assertEqual(hashlib.sha256(child_bytes).hexdigest(), child_image["sha256"])
 
     def test_cli_status_and_invalid_arguments_do_not_start_a_native_backend(self):
         with tempfile.TemporaryDirectory() as tmp:

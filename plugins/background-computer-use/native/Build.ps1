@@ -1,9 +1,21 @@
 param(
-    [string]$DotnetPath = 'D:\Tools\BackgroundComputerUse\dotnet\dotnet.exe',
-    [string]$OutputPath = 'D:\Tools\BackgroundComputerUse\native',
-    [string]$BuildRoot = 'D:\Tools\BackgroundComputerUse\build'
+    [string]$DotnetPath = '',
+    [string]$OutputPath = "$env:LOCALAPPDATA\BackgroundComputerUse\native",
+    [string]$BuildRoot = "$env:LOCALAPPDATA\BackgroundComputerUse\build"
 )
 $ErrorActionPreference = 'Stop'
+$OutputPath = [IO.Path]::GetFullPath($OutputPath)
+$BuildRoot = [IO.Path]::GetFullPath($BuildRoot)
+if ([string]::IsNullOrWhiteSpace($DotnetPath)) {
+    $dotnetCommand = Get-Command dotnet -ErrorAction SilentlyContinue
+    if ($null -eq $dotnetCommand) {
+        throw 'Install the pinned .NET SDK 10.0.403 or pass its absolute dotnet.exe path with -DotnetPath.'
+    }
+    $DotnetPath = $dotnetCommand.Source
+}
+if (-not (Test-Path -LiteralPath $DotnetPath -PathType Leaf)) {
+    throw "dotnet.exe was not found: $DotnetPath"
+}
 $toolRoot = Split-Path -Parent ([IO.Path]::GetFullPath($BuildRoot))
 $env:DOTNET_CLI_HOME = Join-Path $toolRoot 'dotnet-home'
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'

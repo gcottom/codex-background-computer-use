@@ -53,8 +53,11 @@ class FakeBackend:
         self.capture_geometry_verified = True
         self.capture_geometry_width = None
         self.capture_bytes = None
+        self.surfaces = []
+        self.surface_capture_error = None
         self.action_error = None
         self.action_after = None
+        self.restore_focus_result = None
         self.action_entered = None
         self.release_action = None
 
@@ -71,21 +74,36 @@ class FakeBackend:
             return {"windows": [copy.deepcopy(self.window)], "desktop": copy.deepcopy(self.desktop)}
         if verb == "inspect":
             return {"window": copy.deepcopy(self.window), "elements": copy.deepcopy(self.controls),
+                    "surfaces": copy.deepcopy(self.surfaces),
                     "counter": self.counter, "before": copy.deepcopy(self.desktop),
                     "after": copy.deepcopy(self.desktop), "truncated": False}
         if verb == "capture":
-            if self.capture_error:
-                raise self.capture_error
-            width = self.window["window_rect"]["width"]
-            height = self.window["window_rect"]["height"]
-            Path(request["path"]).write_bytes(self.capture_bytes if self.capture_bytes is not None else png_bytes(width, height))
-            rect = copy.deepcopy(self.window["window_rect"])
+            surface = None
+            if request.get("surface_hwnd") is not None:
+                if self.surface_capture_error:
+                    raise self.surface_capture_error
+                matches = [item for item in self.surfaces if item["hwnd"] == request["surface_hwnd"]
+                           and item["pid"] == request["surface_pid"] and item["start_time"] == request["surface_start_time"]]
+                if len(matches) != 1:
+                    raise BackgroundError("stale_surface", "Fixture surface identity changed.")
+                surface = copy.deepcopy(matches[0])
+                rect = copy.deepcopy(surface["window_rect"])
+            else:
+                if self.capture_error:
+                    raise self.capture_error
+                rect = copy.deepcopy(self.window["window_rect"])
+            width = rect["width"]
+            height = rect["height"]
+            Path(request["path"]).write_bytes(self.capture_bytes if self.capture_bytes is not None and surface is None else png_bytes(width, height))
             if self.capture_geometry_width is not None:
                 rect["width"] = self.capture_geometry_width
             return {"width": width, "height": height, "method": self.capture_method,
-                    "geometry": {"geometry_verified": self.capture_geometry_verified, "screen_rect": rect},
+                    "geometry": {"geometry_verified": self.capture_geometry_verified, "screen_rect": rect,
+                                 "client_rect": copy.deepcopy(surface["client_rect"] if surface else self.window["client_rect"])},
+                    "surface": surface,
                     "before": copy.deepcopy(self.desktop), "after": copy.deepcopy(self.desktop)}
         if verb in ("act", "click"):
+            desktop_before = copy.deepcopy(self.desktop)
             if self.action_entered is not None:
                 self.action_entered.set()
                 if not self.release_action.wait(5):
@@ -96,9 +114,39 @@ class FakeBackend:
                 self.controls[1]["value"] = request["value"]
             else:
                 self.counter += 1
+            foreground_before = {
+                "hwnd": desktop_before["foreground_hwnd"], "pid": 27182, "start_time": "638973936000000001",
+                "title": "Previous foreground", "class_name": "FixtureForeground", "session_id": 1,
+                "virtual_desktop_id": "00000000-0000-0000-0000-000000000001", "on_current_virtual_desktop": True,
+            }
+            desktop_after = copy.deepcopy(self.action_after or desktop_before)
+            if self.action_after is not None:
+                self.desktop = copy.deepcopy(desktop_after)
+            focus_restoration = None
+            if request.get("restore_foreground") and self.restore_focus_result is not None:
+                focus_restoration = copy.deepcopy(self.restore_focus_result)
+                self.desktop = copy.deepcopy(focus_restoration.get("after", self.desktop))
             return {"executed": True, "method": "fixture-pattern" if verb == "act" else "fixture-message",
-                    "before": copy.deepcopy(self.desktop),
-                    "after": copy.deepcopy(self.action_after or self.desktop), "counter": self.counter}
+                    "before": desktop_before, "after": copy.deepcopy(self.desktop), "action_after": desktop_after,
+                    "foreground_before": foreground_before,
+                    "action_process_path": r"C:\\Program Files\\Oracle\\VirtualBox\\VirtualBox.exe",
+                    "minimize_activating_window": bool(request.get("minimize_activating_window")),
+                    "focus_restoration": focus_restoration,
+                    "counter": self.counter}
+        if verb == "restore_foreground":
+            if self.restore_focus_result is not None:
+                self.desktop = copy.deepcopy(self.restore_focus_result.get("after", self.desktop))
+                return copy.deepcopy(self.restore_focus_result)
+            before = copy.deepcopy(self.desktop)
+            if self.desktop.get("foreground_hwnd") != request["expected_foreground_hwnd"]:
+                return {"attempted": False, "restored": False, "reason": "foreground_changed_again", "before": before, "after": before}
+            if self.desktop.get("cursor") != request["expected_cursor"]:
+                return {"attempted": False, "restored": False, "reason": "cursor_moved_since_observation", "before": before, "after": before}
+            user_input_since_observation = self.desktop.get("last_input_tick") != request["expected_last_input_tick"]
+            self.desktop["foreground_hwnd"] = request["previous_foreground"]["hwnd"]
+            after = copy.deepcopy(self.desktop)
+            return {"attempted": True, "restored": True, "reason": "restored",
+                    "user_input_since_observation": user_input_since_observation, "before": before, "after": after}
         raise AssertionError("Unpermitted backend route: " + str(request))
 
 
@@ -226,6 +274,30 @@ class BackgroundCoreTests(unittest.TestCase):
         self.assertEqual(self.backend.controls[1]["value"], "semantic-only")
         self.assertLessEqual(set(r["verb"] for r in self.backend.calls), {"list", "inspect", "capture", "act"})
 
+    def test_child_process_surface_capture_and_click_work_when_bound_parent_is_minimized(self):
+        self.backend.window["window_rect"] = {"x": -32000, "y": -32000, "width": 199, "height": 34}
+        self.backend.window["client_rect"] = {"x": -32000, "y": -32000, "width": 0, "height": 0}
+        self.backend.window["is_minimized"] = True
+        self.backend.capture_error = BackgroundError("window_minimized", "Parent is minimized.")
+        self.backend.surfaces = [{
+            "hwnd": "90001", "pid": 27182, "start_time": "638973936000000001", "title": "Embedded surface",
+            "class_name": "WebViewChild", "route": "uia_provider_process_descendant",
+            "window_rect": {"x": 10, "y": 20, "width": 80, "height": 60},
+            "client_rect": {"x": 10, "y": 20, "width": 80, "height": 60},
+        }]
+        observed = self.observe(image=True)
+        self.assertIsNone(observed["image"])
+        self.assertEqual(observed["image_error"]["code"], "window_minimized")
+        self.assertEqual(len(observed["surface_images"]), 1)
+        self.assertIsNotNone(observed["surface_images"][0]["image"])
+        self.assertEqual(self.backend.calls[-1]["surface_hwnd"], "90001")
+
+        self.lab.click_background_window(observed["observation_id"], 20, 20, surface_hwnd="90001")
+        click = self.backend.mutations[0]
+        self.assertEqual((click["screen_x"], click["screen_y"]), (30, 40))
+        self.assertEqual(click["surface_hwnd"], "90001")
+        self.assertEqual(click["surface_pid"], 27182)
+
     def test_capture_backend_cannot_silently_change_to_printwindow(self):
         self.backend.capture_method = "printwindow"
         observed = self.observe(image=True)
@@ -334,6 +406,114 @@ class BackgroundCoreTests(unittest.TestCase):
         self.assertFalse(delta["preservation_verified"])
         self.assertEqual(self.backend.counter, 1)
         self.assertLessEqual(set(r["verb"] for r in self.backend.calls), {"list", "inspect", "act"})
+
+    def test_opt_in_focus_handback_restores_previous_window_after_fresh_observation(self):
+        observed = self.observe()
+        self.backend.action_after = copy.deepcopy(self.backend.desktop)
+        self.backend.action_after["foreground_hwnd"] = "0x22222"
+        result = self.lab.act_on_control(observed["observation_id"], "increment", "invoke", restore_foreground=True)
+        self.assertTrue(result["focus_restoration"]["restored"])
+        self.assertTrue(result["focus_restoration"]["foreground_verified"])
+        self.assertEqual(self.backend.desktop["foreground_hwnd"], "0x98765")
+        restore_call = next(call for call in self.backend.calls if call["verb"] == "restore_foreground")
+        self.assertEqual(restore_call["expected_foreground_hwnd"], "0x22222")
+        self.assertEqual(restore_call["previous_foreground"]["hwnd"], "0x98765")
+        self.assertTrue(result["focus_restoration"]["foreground_observation"]["preservation_verified"])
+
+    def test_native_in_action_focus_handback_is_used_before_fresh_capture(self):
+        observed = self.observe()
+        self.backend.action_after = copy.deepcopy(self.backend.desktop)
+        self.backend.action_after["foreground_hwnd"] = "0x22222"
+        restored = copy.deepcopy(self.backend.desktop)
+        self.backend.restore_focus_result = {"attempted": True, "restored": True, "reason": "restored",
+                                             "before": self.backend.action_after, "after": restored}
+        result = self.lab.act_on_control(observed["observation_id"], "increment", "invoke", restore_foreground=True)
+        self.assertTrue(result["focus_restoration"]["restored"])
+        self.assertEqual(result["focus_restoration"]["attempts"][0]["phase"], "inside_action")
+        self.assertFalse(any(call["verb"] == "restore_foreground" for call in self.backend.calls))
+        action_index = next(i for i, call in enumerate(self.backend.calls) if call["verb"] == "act")
+        fresh_capture_index = max(i for i, call in enumerate(self.backend.calls) if call["verb"] == "inspect")
+        self.assertLess(action_index, fresh_capture_index)
+
+    def test_desktop_restore_is_success_even_if_foreground_snapshot_lags(self):
+        observed = self.observe()
+        self.backend.action_after = copy.deepcopy(self.backend.desktop)
+        self.backend.action_after["foreground_hwnd"] = "0x22222"
+        self.backend.restore_focus_result = {
+            "attempted": True, "restored": True, "desktop_restored": True,
+            "foreground_verified": False, "reason": "desktop_restored_foreground_pending",
+            "before": copy.deepcopy(self.backend.action_after), "after": copy.deepcopy(self.backend.action_after),
+        }
+        result = self.lab.act_on_control(observed["observation_id"], "increment", "invoke", restore_foreground=True)
+        self.assertTrue(result["focus_restoration"]["restored"])
+        self.assertTrue(result["focus_restoration"]["desktop_restored"])
+        self.assertFalse(result["focus_restoration"]["foreground_verified"])
+        self.assertEqual([attempt["phase"] for attempt in result["focus_restoration"]["attempts"]],
+                         ["inside_action", "immediate_retry", "after_observation"])
+        call_indices = [i for i, call in enumerate(self.backend.calls) if call["verb"] == "restore_foreground"]
+        first_fresh_observation = next(i for i, call in enumerate(self.backend.calls)
+                                       if call["verb"] == "inspect" and i > call_indices[0])
+        self.assertLess(call_indices[0], first_fresh_observation)
+
+    def test_opt_in_focus_handback_returns_to_saved_window_during_typing(self):
+        observed = self.observe()
+        self.backend.action_after = copy.deepcopy(self.backend.desktop)
+        self.backend.action_after["foreground_hwnd"] = "0x22222"
+        self.backend.action_after["last_input_tick"] += 1
+        result = self.lab.act_on_control(observed["observation_id"], "increment", "invoke", restore_foreground=True)
+        self.assertTrue(result["focus_restoration"]["restored"])
+        self.assertTrue(result["focus_restoration"]["attempts"][0]["user_input_since_observation"])
+        self.assertEqual(self.backend.desktop["foreground_hwnd"], "0x98765")
+
+    def test_opt_in_focus_handback_still_stops_after_pointer_movement(self):
+        observed = self.observe()
+        self.backend.action_after = copy.deepcopy(self.backend.desktop)
+        self.backend.action_after["foreground_hwnd"] = "0x22222"
+        self.backend.action_after["cursor"]["x"] += 1
+        result = self.lab.act_on_control(observed["observation_id"], "increment", "invoke", restore_foreground=True)
+        self.assertFalse(result["focus_restoration"]["restored"])
+        self.assertEqual(result["focus_restoration"]["reason"], "cursor_moved_since_observation")
+        self.assertEqual(self.backend.desktop["foreground_hwnd"], "0x22222")
+
+    def test_delayed_handback_does_not_override_a_different_foreground_window(self):
+        observed = self.observe()
+        self.backend.action_after = copy.deepcopy(self.backend.desktop)
+        self.backend.action_after["foreground_hwnd"] = "0x22222"
+        other = copy.deepcopy(self.backend.action_after)
+        other["foreground_hwnd"] = "0x33333"
+        self.backend.restore_focus_result = {
+            "attempted": False, "restored": False, "reason": "foreground_changed_again",
+            "before": copy.deepcopy(other), "after": copy.deepcopy(other),
+        }
+        result = self.lab.act_on_control(observed["observation_id"], "increment", "invoke", restore_foreground=True)
+        self.assertFalse(result["focus_restoration"]["restored"])
+        self.assertEqual(result["focus_restoration"]["reason"], "foreground_changed_again")
+        self.assertFalse(any(call["verb"] == "restore_foreground" for call in self.backend.calls))
+
+    def test_minimize_fallback_is_explicit_and_passed_to_native_handback(self):
+        observed = self.observe()
+        self.backend.action_after = copy.deepcopy(self.backend.desktop)
+        self.backend.action_after["foreground_hwnd"] = "0x22222"
+        self.backend.restore_focus_result = {
+            "attempted": True, "restored": False, "foreground_verified": False,
+            "reason": "set_foreground_denied", "before": copy.deepcopy(self.backend.action_after),
+            "after": copy.deepcopy(self.backend.action_after),
+        }
+        with self.assertRaises(BackgroundError) as caught:
+            self.lab.act_on_control(observed["observation_id"], "increment", "invoke",
+                                    minimize_activating_window=True)
+        self.assertEqual(caught.exception.code, "invalid_arguments")
+        self.assertFalse(any(call["verb"] == "act" for call in self.backend.calls))
+
+        observed = self.observe()
+        result = self.lab.act_on_control(observed["observation_id"], "increment", "invoke",
+                                         restore_foreground=True, minimize_activating_window=True)
+        action_call = next(call for call in self.backend.calls if call["verb"] == "act")
+        retry_call = [call for call in self.backend.calls if call["verb"] == "restore_foreground"][-1]
+        self.assertTrue(action_call["minimize_activating_window"])
+        self.assertTrue(retry_call["minimize_activating_window"])
+        self.assertEqual(retry_call["action_process_path"], r"C:\\Program Files\\Oracle\\VirtualBox\\VirtualBox.exe")
+        self.assertTrue(result["focus_restoration"]["requested"])
 
     def test_foreground_handoff_sends_no_input_and_does_not_consume_observation(self):
         observed = self.observe()

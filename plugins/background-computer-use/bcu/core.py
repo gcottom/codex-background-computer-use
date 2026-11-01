@@ -14,10 +14,11 @@ import time
 import uuid
 
 
-VERSION = "0.1.2"
+VERSION = "0.1.9"
 OBSERVATION_SECONDS = 30
 WINDOW_SECONDS = 600
 MAX_PIXELS = 20_000_000
+MAX_SURFACE_IMAGES = 3
 TOKEN = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -143,7 +144,7 @@ class BackgroundLab:
     def background_status(self):
         configured = self.backend_override is not None or (self.root / "tools.json").is_file()
         result = {"version": VERSION, "platform": sys.platform, "data_root": str(self.root), "configured": configured,
-                  "background_policy": "No activation, restore, global mouse/keyboard injection, or clipboard fallback.",
+                  "background_policy": "No global mouse/keyboard injection or clipboard fallback. Optional guarded foreground handback runs inside the native action call and may retry after capture.",
                   "observation_lifetime_seconds": OBSERVATION_SECONDS,
                   "foreground_mouse": "Available through the existing Computer Use skill when the user chooses that mode."}
         if configured:
@@ -212,29 +213,37 @@ class BackgroundLab:
         image = None
         image_error = None
         capture = None
+        latest_capture = None
+        surface_images = []
         if include_image:
             image_path = self.root / "captures" / (uuid.uuid4().hex + ".png")
             image_path.parent.mkdir(parents=True, exist_ok=True)
             try:
                 capture = self._call({"verb": "capture", **self._identity(binding), "path": str(image_path), "timeout_ms": 4000})
-                with image_path.open("rb") as stream:
-                    header = stream.read(24)
-                if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
-                    raise BackgroundError("invalid_capture", "Native capture did not produce a PNG.")
-                width, height = struct.unpack(">II", header[16:24])
-                if not width or not height or width * height > MAX_PIXELS:
-                    raise BackgroundError("invalid_capture", "Capture exceeds the pixel budget.")
-                if capture.get("width") != width or capture.get("height") != height or capture.get("method") != "wgc-only":
-                    raise BackgroundError("invalid_capture", "Capture dimensions or strict backend identity do not match.")
-                image = {"path": str(image_path), "sha256": file_hash(image_path), "width": width, "height": height,
-                         "method": capture["method"], "geometry": capture.get("geometry", {}), "captured_at": utc_now()}
+                latest_capture = capture
+                image = self._capture_image(image_path, capture)
             except (BackgroundError, OSError) as exc:
                 image_error = {"code": getattr(exc, "code", "capture_failed"), "message": str(exc), "fallback_performed": False}
+            child_surfaces = [surface for surface in inspected.get("surfaces", [])
+                              if surface.get("route") != "same_process_child"][:MAX_SURFACE_IMAGES]
+            for surface in child_surfaces:
+                candidate_path = self.root / "captures" / (uuid.uuid4().hex + ".png")
+                candidate_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    child_capture = self._call({"verb": "capture", **self._identity(binding),
+                        "surface_hwnd": surface["hwnd"], "surface_pid": surface["pid"],
+                        "surface_start_time": surface["start_time"], "path": str(candidate_path), "timeout_ms": 4000})
+                    latest_capture = child_capture
+                    surface_images.append({"surface": surface, "image": self._capture_image(candidate_path, child_capture), "image_error": None})
+                except (BackgroundError, OSError) as exc:
+                    surface_images.append({"surface": surface, "image": None,
+                        "image_error": {"code": getattr(exc, "code", "capture_failed"), "message": str(exc)}})
         before = inspected.get("before", inspected.get("desktop"))
-        after = capture.get("after") if capture else inspected.get("after", inspected.get("desktop"))
+        after = latest_capture.get("after") if latest_capture else inspected.get("after", inspected.get("desktop"))
         token = uuid.uuid4().hex
         observation = {
             "observation_id": token, "window_id": window_id, "window": window, "controls": controls,
+            "surfaces": inspected.get("surfaces", []), "surface_images": surface_images,
             "truncated": bool(inspected.get("truncated")), "depth": depth, "max_nodes": max_nodes,
             "image": image, "image_error": image_error, "observed_at": utc_now(), "created_at_epoch": self.clock(),
             "consumed": False, "desktop_before": before, "desktop_after": after,
@@ -242,6 +251,21 @@ class BackgroundLab:
         }
         atomic_json(self._path("observations", token), observation)
         return observation
+
+    @staticmethod
+    def _capture_image(path, capture):
+        with path.open("rb") as stream:
+            header = stream.read(24)
+        if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+            raise BackgroundError("invalid_capture", "Native capture did not produce a PNG.")
+        width, height = struct.unpack(">II", header[16:24])
+        if not width or not height or width * height > MAX_PIXELS:
+            raise BackgroundError("invalid_capture", "Capture exceeds the pixel budget.")
+        if capture.get("width") != width or capture.get("height") != height or capture.get("method") != "wgc-only":
+            raise BackgroundError("invalid_capture", "Capture dimensions or strict backend identity do not match.")
+        return {"path": str(path), "sha256": file_hash(path), "width": width, "height": height,
+                "method": capture["method"], "geometry": capture.get("geometry", {}),
+                "surface": capture.get("surface"), "captured_at": utc_now()}
 
     @contextmanager
     def _window_lock(self, binding):
@@ -315,16 +339,89 @@ class BackgroundLab:
                 candidates.append(element)
         return min(candidates, key=lambda item: (-item.get("depth", 0), item["bounds"]["width"] * item["bounds"]["height"])) if candidates else None
 
-    def _verify_after(self, observation, action):
+    def _verify_after(self, observation, action, restore_foreground=False):
         result = {"action": action, "desktop_observation": desktop_delta(action.get("before"), action.get("after")),
                   "meaning": "Delivery/pattern execution is reported. Inspect the fresh observation to verify the intended result."}
+        focus_attempts = []
+        if restore_foreground:
+            native_focus = action.get("focus_restoration")
+            if isinstance(native_focus, dict):
+                focus_attempts.append({"phase": "inside_action", **native_focus})
+                action_desktop = action.get("action_after")
+                post_action_desktop = action.get("after")
+                native_verified = native_focus.get("foreground_verified", native_focus.get("restored", False))
+                if (not native_verified and isinstance(action_desktop, dict) and isinstance(post_action_desktop, dict)
+                        and post_action_desktop.get("foreground_hwnd") == action_desktop.get("foreground_hwnd")
+                        and post_action_desktop.get("cursor") == action.get("before", {}).get("cursor")):
+                    focus_attempts.append({"phase": "immediate_retry",
+                                           **self._restore_previous_foreground(action, post_action_desktop)})
+            else:
+                focus_attempts.append({"phase": "immediate", **self._restore_previous_foreground(action, action.get("after"))})
         try:
             result["observation"] = self.observe_background_window(observation["window_id"], bool(observation.get("image")), observation["depth"], observation["max_nodes"])
         except BackgroundError as exc:
             result["verification_error"] = {"code": exc.code, "message": str(exc), "action_may_have_happened": True}
+        if restore_foreground:
+            previous = action.get("foreground_before")
+            before = action.get("before")
+            final_desktop = result.get("observation", {}).get("desktop_after")
+            action_desktop = action.get("action_after")
+            can_retry = (isinstance(previous, dict) and isinstance(before, dict) and isinstance(final_desktop, dict)
+                         and isinstance(action_desktop, dict)
+                         and final_desktop.get("foreground_hwnd") != previous.get("hwnd")
+                         and final_desktop.get("foreground_hwnd") == action_desktop.get("foreground_hwnd")
+                         and final_desktop.get("cursor") == before.get("cursor"))
+            if can_retry:
+                focus_attempts.append({"phase": "after_observation", **self._restore_previous_foreground(action, final_desktop)})
+            result["focus_restoration"] = {
+                "requested": True, "attempts": focus_attempts,
+                "restored": any(bool(attempt.get("restored")) for attempt in focus_attempts),
+                "desktop_restored": any(bool(attempt.get("desktop_restored")) for attempt in focus_attempts),
+                "foreground_verified": any(bool(attempt.get("foreground_verified", attempt.get("restored"))) for attempt in focus_attempts),
+                "reason": focus_attempts[-1].get("reason") if focus_attempts else "foreground_snapshot_unavailable",
+                "final_desktop": result.get("focus_restoration", {}).get("after") or final_desktop,
+            }
+            if isinstance(before, dict) and isinstance(result["focus_restoration"]["final_desktop"], dict):
+                result["focus_restoration"]["foreground_observation"] = desktop_delta(before, result["focus_restoration"]["final_desktop"])
         return result
 
-    def act_on_control(self, observation_id, element_id, action, value=None, direction=None):
+    def _restore_previous_foreground(self, action, desktop_state):
+        before = action.get("before")
+        previous = action.get("foreground_before")
+        if not isinstance(before, dict) or not isinstance(previous, dict):
+            return {"attempted": False, "restored": False, "reason": "foreground_snapshot_unavailable"}
+        if previous.get("hwnd") != before.get("foreground_hwnd"):
+            return {"attempted": False, "restored": False, "reason": "foreground_snapshot_raced"}
+        if not isinstance(desktop_state, dict) or desktop_state.get("foreground_hwnd") is None:
+            return {"attempted": False, "restored": False, "reason": "post_action_desktop_unavailable"}
+        if desktop_state.get("foreground_hwnd") == previous.get("hwnd"):
+            return {"attempted": False, "restored": True, "reason": "foreground_unchanged", "after": desktop_state}
+        request = {
+            "verb": "restore_foreground", "previous_foreground": previous,
+            "expected_foreground_hwnd": desktop_state["foreground_hwnd"],
+            "expected_last_input_tick": before.get("last_input_tick"),
+            "expected_cursor": before.get("cursor"),
+            "expected_session_id": before.get("session_id"),
+            "expected_process_desktop": before.get("process_desktop"),
+            "expected_input_desktop": before.get("input_desktop"),
+            "action_process_path": action.get("action_process_path"),
+            "minimize_activating_window": bool(action.get("minimize_activating_window")),
+        }
+        try:
+            restored = self._call(request)
+        except BackgroundError as exc:
+            return {"attempted": True, "restored": False, "reason": exc.code, "message": str(exc)}
+        restored["foreground_observation"] = desktop_delta(before, restored.get("after"))
+        return restored
+
+    def act_on_control(self, observation_id, element_id, action, value=None, direction=None,
+                       restore_foreground=False, minimize_activating_window=False):
+        if type(restore_foreground) is not bool:
+            raise BackgroundError("invalid_arguments", "restore_foreground must be a boolean.")
+        if type(minimize_activating_window) is not bool:
+            raise BackgroundError("invalid_arguments", "minimize_activating_window must be a boolean.")
+        if minimize_activating_window and not restore_foreground:
+            raise BackgroundError("invalid_arguments", "minimize_activating_window requires restore_foreground.")
         allowed = {"invoke", "set_value", "toggle", "select", "expand", "collapse", "scroll"}
         if action not in allowed:
             raise BackgroundError("unsupported_action", "Use a supported UI Automation pattern action.")
@@ -355,21 +452,40 @@ class BackgroundLab:
                 "expected_bounds": current.get("bounds"), "expected_title": observation["window"].get("title"),
                 "expected_class_name": observation["window"].get("class_name"),
             }
+            if restore_foreground:
+                request["restore_foreground"] = True
+                request["minimize_activating_window"] = minimize_activating_window
             if value is not None:
                 request["value"] = value
             if direction is not None:
                 request["direction"] = direction
             executed = self._call(request)
-            return self._verify_after(observation, executed)
+            return self._verify_after(observation, executed, restore_foreground)
 
-    def click_background_window(self, observation_id, x, y, button="left"):
+    def click_background_window(self, observation_id, x, y, button="left", surface_hwnd=None,
+                                restore_foreground=False, minimize_activating_window=False):
+        if type(restore_foreground) is not bool:
+            raise BackgroundError("invalid_arguments", "restore_foreground must be a boolean.")
+        if type(minimize_activating_window) is not bool:
+            raise BackgroundError("invalid_arguments", "minimize_activating_window must be a boolean.")
+        if minimize_activating_window and not restore_foreground:
+            raise BackgroundError("invalid_arguments", "minimize_activating_window requires restore_foreground.")
         if button not in ("left", "right") or type(x) is not int or type(y) is not int:
             raise BackgroundError("invalid_coordinates", "Use integer image pixels and left/right button.")
         first = self._observation(observation_id)
         binding = self._window(first["window_id"])
         with self._window_lock(binding):
             observation = self._claim(observation_id)
-            image = observation.get("image")
+            selected_surface = None
+            if surface_hwnd is None:
+                image = observation.get("image")
+            else:
+                matches = [item for item in observation.get("surface_images", [])
+                           if item.get("surface", {}).get("hwnd") == surface_hwnd and item.get("image") is not None]
+                if len(matches) != 1:
+                    raise BackgroundError("stale_surface", "Use one child surface image from this observation.")
+                selected_surface = matches[0]["surface"]
+                image = matches[0]["image"]
             if not image or not 0 <= x < image["width"] or not 0 <= y < image["height"]:
                 raise BackgroundError("invalid_coordinates", "Click needs pixels inside this observation's captured image.")
             if not Path(image["path"]).is_file() or file_hash(image["path"]) != image["sha256"]:
@@ -383,6 +499,17 @@ class BackgroundLab:
                 raise BackgroundError("coordinate_mapping_unavailable", "Captured frame dimensions do not match the physical mapping.")
             current = self._current(observation, binding)
             screen_x, screen_y = screen["x"] + x, screen["y"] + y
+            if selected_surface is not None:
+                live_surfaces = [item for item in current.get("surfaces", []) if item.get("hwnd") == surface_hwnd]
+                if len(live_surfaces) != 1 or any(live_surfaces[0].get(key) != selected_surface.get(key)
+                    for key in ("pid", "start_time", "title", "class_name", "window_rect", "client_rect", "route")):
+                    raise BackgroundError("stale_surface", "Child surface identity or geometry changed; observe again.")
+                surface_client = selected_surface.get("client_rect", {})
+                if not all(key in surface_client for key in ("x", "y", "width", "height")):
+                    raise BackgroundError("coordinate_mapping_unavailable", "Child surface has no verified client geometry.")
+                if not (surface_client["x"] <= screen_x < surface_client["x"] + surface_client["width"]
+                        and surface_client["y"] <= screen_y < surface_client["y"] + surface_client["height"]):
+                    raise BackgroundError("outside_client", "Child surface clicks are limited to its verified client content.")
             for control in current.get("elements", []):
                 bounds = control.get("bounds", {})
                 if (control.get("is_password") and all(key in bounds for key in ("x", "y", "width", "height"))
@@ -397,16 +524,26 @@ class BackgroundLab:
                     raise BackgroundError("stale_element", "The control under the image pixel changed; observe again.")
             if current_target is not None and not current_target.get("enabled", True):
                 raise BackgroundError("disabled_control", "The control under this pixel is disabled.")
-            client_x = screen["x"] + x - client["x"]
-            client_y = screen["y"] + y - client["y"]
-            if not 0 <= client_x < client["width"] or not 0 <= client_y < client["height"]:
-                raise BackgroundError("outside_client", "Background messages are limited to the client content, not window chrome.")
-            request = {"verb": "click", **self._identity(binding), "client_x": client_x, "client_y": client_y,
-                       "button": button, "expected_window_rect": observation["window"].get("window_rect"),
+            request = {"verb": "click", **self._identity(binding), "button": button,
+                       "expected_window_rect": observation["window"].get("window_rect"),
                        "expected_client_rect": client, "expected_title": observation["window"].get("title"),
                        "expected_class_name": observation["window"].get("class_name")}
+            if restore_foreground:
+                request["restore_foreground"] = True
+                request["minimize_activating_window"] = minimize_activating_window
+            if selected_surface is None:
+                client_x = screen["x"] + x - client["x"]
+                client_y = screen["y"] + y - client["y"]
+                if not 0 <= client_x < client["width"] or not 0 <= client_y < client["height"]:
+                    raise BackgroundError("outside_client", "Background messages are limited to the client content, not window chrome.")
+                request.update({"client_x": client_x, "client_y": client_y})
+            else:
+                request.update({"surface_hwnd": selected_surface["hwnd"], "surface_pid": selected_surface["pid"],
+                    "surface_start_time": selected_surface["start_time"], "screen_x": screen_x, "screen_y": screen_y,
+                    "expected_surface_window_rect": selected_surface["window_rect"],
+                    "expected_surface_client_rect": selected_surface["client_rect"]})
             executed = self._call(request)
-            return self._verify_after(observation, executed)
+            return self._verify_after(observation, executed, restore_foreground)
 
     def prepare_foreground_mouse(self, observation_id):
         observation = self._observation(observation_id)

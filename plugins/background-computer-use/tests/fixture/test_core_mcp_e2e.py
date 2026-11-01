@@ -246,13 +246,25 @@ def main():
         payload = mcp_observation["structuredContent"]
         assert control(payload, "Test value").get("value") == "python-core-background-verified"
         images = [item for item in mcp_observation["content"] if item["type"] == "image"]
-        assert len(images) == 1 and images[0]["mimeType"] == "image/png"
+        expected_surfaces = [candidate["image"] for candidate in payload.get("surface_images", [])
+                             if candidate.get("image") and Path(candidate["image"]["path"]).is_file()
+                             and Path(candidate["image"]["path"]).stat().st_size <= 12 * 1024 * 1024]
+        assert len(images) == 1 + len(expected_surfaces) and all(item["mimeType"] == "image/png" for item in images)
         decoded = base64.b64decode(images[0]["data"], validate=True)
         image_stats = png_stats(decoded)
         assert image_stats["sha256"] == payload["image"]["sha256"]
         summary["mcp_image"] = image_stats
+        child_image_hashes = []
+        for inline, surface_image in zip(images[1:], expected_surfaces):
+            child_decoded = base64.b64decode(inline["data"], validate=True)
+            child_stats = png_stats(child_decoded)
+            assert child_stats["sha256"] == surface_image["sha256"]
+            child_image_hashes.append(child_stats["sha256"])
+        summary["mcp_child_surface_images"] = len(child_image_hashes)
         receipts[-1]["result"] = {"isError": mcp_observation["isError"], "structuredContent": payload,
-                                   "content": [{"type": "image", "mimeType": "image/png", "decoded_bytes": len(decoded), "sha256": image_stats["sha256"]}, {"type": "text", "payload_matches_structured_content": json.loads(mcp_observation["content"][0]["text"]) == payload}]}
+                                   "content": [{"type": "image", "mimeType": "image/png", "sha256": image_stats["sha256"]},
+                                               *[{"type": "image", "mimeType": "image/png", "sha256": digest} for digest in child_image_hashes],
+                                               {"type": "text", "payload_matches_structured_content": json.loads(mcp_observation["content"][0]["text"]) == payload}]}
         mcp_handoff = record("mcp-prepare-foreground-handoff-no-input", lambda: client.rpc("tools/call", {"name": "prepare_foreground_mouse", "arguments": {"observation_id": payload["observation_id"]}}))
         assert not mcp_handoff["isError"] and mcp_handoff["structuredContent"]["input_executed"] is False
         summary.update(functional_passed=True, final_readback={key: read_json(run / "ready.json")[key] for key in ("value", "counter")},
