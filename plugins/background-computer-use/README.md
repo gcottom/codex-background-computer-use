@@ -28,6 +28,10 @@ The agent binds each observation to a specific window and process. Actions use f
 - Optionally restore the saved foreground window and virtual desktop after an application action changes focus.
 - Hand off to foreground mouse control when background messages are unsuitable.
 
+### Visual-coordinate fallback
+
+When UI Automation does not expose a useful control, inspect the target window's fresh WGC image and infer the control's zero-based pixel coordinates. Pass those coordinates to `click_background_window`; the plugin validates the observation and window geometry before sending a scoped click. This works for supported custom-drawn or icon-only controls and does not move the physical pointer. Capture the window itself rather than the full desktop: covered pixels belong to the target frame, while a desktop image includes unrelated foreground content. A visually plausible click is still only an attempted action; inspect the returned observation to confirm the app responded.
+
 ### Focus handback
 
 Set `restore_foreground: true` on an action when the user wants the previously active app and desktop returned afterward. The native helper first attempts handback during the action. If Windows has switched desktops but has not yet published the exact foreground window, the plugin makes a foreground-only retry before taking its fresh verification screenshot.
@@ -60,7 +64,7 @@ codex plugin marketplace add gcottom/codex-background-computer-use
 codex plugin add background-computer-use@background-computer-use-marketplace
 ```
 
-Codex must be installed locally. Build and configure the native helper separately after installing the plugin; the marketplace does not automatically download or run native executables.
+Codex must be installed locally. Python 3.10+ and the Windows `py -3` launcher are used by the bundled server. Build and configure the native helper separately after installing the plugin; the marketplace does not automatically download or run native executables.
 
 ## Build and configure the native helper
 
@@ -113,3 +117,7 @@ Use the tool schemas returned by `--list-tools` for request fields. After each a
 The 0.1.9 release passes 39 Python/core/server tests and a locked native-helper build. A live VirtualBox Manager Home-view test switched desktops and verified return to the exact saved ChatGPT foreground window. Native handback work measured about 119 ms across the initial desktop restoration and the immediate foreground-only retry. That live run had no concurrent keyboard input; the typing-tolerance behavior is covered by regression tests.
 
 See [VALIDATION.md](VALIDATION.md) for current release evidence and limits, [VALIDATION_HISTORY.md](VALIDATION_HISTORY.md) for previous release receipts, [CHANGELOG.md](CHANGELOG.md) for version history, and [THIRD_PARTY.md](THIRD_PARTY.md) for native dependency notices.
+
+## License
+
+The project is released under the repository's [GNU General Public License v3.0 only](../../LICENSE). Third-party components retain their own licenses; see [native dependency notices](native/THIRD_PARTY.md).

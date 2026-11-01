@@ -56,3 +56,7 @@ The local Windows host also needs a trusted, self-contained native helper. See t
 - The live VirtualBox check verified return to the exact saved ChatGPT window after a virtual-desktop switch.
 
 Full build hashes, test receipts, historical behavior, and limitations are documented in [VALIDATION.md](plugins/background-computer-use/VALIDATION.md). See [CHANGELOG.md](plugins/background-computer-use/CHANGELOG.md) for the release history and [THIRD_PARTY.md](plugins/background-computer-use/THIRD_PARTY.md) for dependency notices.
+
+## License
+
+This project is released under the [GNU General Public License v3.0 only](LICENSE). Third-party components retain their own licenses; see the [native dependency notices](plugins/background-computer-use/native/THIRD_PARTY.md).
